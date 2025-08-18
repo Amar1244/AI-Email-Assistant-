@@ -6,7 +6,3 @@ sentence-transformers
 numpy
 groq
 python-dotenv
-smtplib
-email-validator
-SpeechRecognition
-pydub
