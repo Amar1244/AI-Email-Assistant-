@@ -1,0 +1,14 @@
+ai_email_api/                # 📂 New FastAPI project folder
+│
+├── main.py                   # Entry point for FastAPI app
+├── requirements.txt          # Python dependencies
+├── config.py                  # (optional) Shared settings
+├── utils/                    # 📂 helper functions
+│   ├── __init__.py
+│   ├── search.py              # MongoDB semantic search logic
+│   ├── email_gen.py           # Groq AI email generation
+│   ├── send_email.py          # SMTP sending
+│   ├── voice.py               # Voice-to-text (optional)
+│   └── logger.py              # Logging sent emails
+└── logs/                      # 📂 store logs if needed
+    └── sent_log.txt

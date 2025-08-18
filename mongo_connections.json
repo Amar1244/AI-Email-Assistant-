@@ -1,0 +1,27 @@
+{
+    "user123": {
+        "mongo_url": "mongodb://localhost:27017",
+        "db_name": "email_db",
+        "collection_name": "contacts"
+    },
+    "test_user_1": {
+        "mongo_url": "mongodb://localhost:27017",
+        "db_name": "email_db",
+        "collection_name": "contacts"
+    },
+    "user_7457": {
+        "mongo_url": "mongodb://localhost:27017",
+        "db_name": "email_db",
+        "collection_name": "contacts"
+    },
+    "Amar Chaurasiya": {
+        "mongo_url": "mongodb+srv://amarchaurasiya124:Amar124@userdata.wgjkdph.mongodb.net/?retryWrites=true&w=majority&appName=UserData",
+        "db_name": "Emailuserdata",
+        "collection_name": "Contacts"
+    },
+    "demo-user": {
+        "mongo_url": "",
+        "db_name": "",
+        "collection_name": ""
+    }
+}

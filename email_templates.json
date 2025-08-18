@@ -1,0 +1,12 @@
+{
+    "Amar124": {
+        "welcome_template": {
+            "template_id": "welcome_template",
+            "subject": "Welcome to our platform!",
+            "body": "Hi {{name}}, we're excited...",
+            "variables": [
+                "name"
+            ]
+        }
+    }
+}

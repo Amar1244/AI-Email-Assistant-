@@ -1,0 +1,22 @@
+{
+    "Amar Chaurasiya": {
+        "uploaded": {
+            "active": true,
+            "priority": 1
+        },
+        "mongo": {
+            "active": true,
+            "priority": 1
+        }
+    },
+    "demo-user": {
+        "uploaded": {
+            "active": true,
+            "priority": 1
+        },
+        "mongo": {
+            "active": true,
+            "priority": 1
+        }
+    }
+}
