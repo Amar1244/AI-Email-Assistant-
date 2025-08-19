@@ -6,3 +6,4 @@ sentence-transformers
 numpy
 groq
 python-dotenv
+pandas
