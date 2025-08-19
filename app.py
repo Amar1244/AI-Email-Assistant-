@@ -25,7 +25,8 @@ load_dotenv()
 USERNAME_FILE = "username.txt"
 EMAIL_CONFIG_FILE = "email_config.txt"
 HISTORY_FILE = "email_history.json"
-API_BASE_URL = "http://localhost:8000"  # Update with your FastAPI server URL
+API_BASE_URL = "https://ai-email-assistant-ljep.onrender.com/"
+  # Update with your FastAPI server URL
 
 # ------------------ Core Functions ------------------
 def generate_email_groq(recipient_name, prompt, sender_name):
