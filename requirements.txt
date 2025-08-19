@@ -7,3 +7,5 @@ numpy
 groq
 python-dotenv
 pandas
+python-multipart
+openpyxl
