@@ -25,15 +25,14 @@ load_dotenv()
 USERNAME_FILE = "username.txt"
 EMAIL_CONFIG_FILE = "email_config.txt"
 HISTORY_FILE = "email_history.json"
-API_BASE_URL = "https://ai-email-assistant-ljep.onrender.com/"
-  # Update with your FastAPI server URL
+API_BASE_URL = "http://localhost:8000"  # Update with your FastAPI server URL
 
 # ------------------ Core Functions ------------------
 def generate_email_groq(recipient_name, prompt, sender_name):
     """Generate email content with robust subject/body parsing"""
     api_key = os.getenv("GROQ_API_KEY")
-    if not api_key: 
-        raise ValueError("GROQ_API_KEY not set.")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY not set. Please set the GROQ_API_KEY environment variable.")
     
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
@@ -126,6 +125,9 @@ def call_api(endpoint, method="GET", data=None, files=None, params=None):
         if method == "GET":
             # IMPORTANT: GET must use query/path parameters, not JSON body
             response = requests.get(url, params=params)
+        elif method == "DELETE":
+            # Use params for querystring data, or fall back to data
+            response = requests.delete(url, params=params or data)
         elif files is not None:
             # Multipart for file uploads
             response = requests.post(url, data=data, files=files)
@@ -190,6 +192,35 @@ def extract_subject_and_body(text: str, fallback_subject: str = "Generated Email
 
 # ------------------ UI Components ------------------
 def sidebar():
+     # Initialize session state for edit form if not exists
+    if "show_edit_form" not in st.session_state:
+        st.session_state.show_edit_form = False
+    
+    # --- Top Sidebar Dropdown for Passcode Steps ---
+    with st.sidebar.expander("📌 Get the Email Passcode Steps"):
+        st.info("⚠️ Note: This is a temporary passcode, not your email password. It will be deleted once you clear the data.")
+        
+        step = st.selectbox("Select Step", [
+            "Step 1: Sign In",
+            "Step 2: Security Tab",
+            "Step 3: Enable 2-Step Verification",
+            "Step 4: App Passwords",
+            "Step 5: Generate Passcode",
+            "Step 6: Copy Passcode"
+        ], key="passcode_steps")
+        
+        if step == "Step 1: Sign In":
+            st.write("Sign in to your Google Account → Manage your Google Account.")
+        elif step == "Step 2: Security Tab":
+            st.write("Go to the **Security** section from the left menu.")
+        elif step == "Step 3: Enable 2-Step Verification":
+            st.write("Turn on **2-Step Verification** if not already enabled.")
+        elif step == "Step 4: App Passwords":
+            st.write("Scroll down and open **App passwords**.")
+        elif step == "Step 5: Generate Passcode":
+            st.write("Choose your **App** and **Device**, then click **Generate**.")
+        elif step == "Step 6: Copy Passcode":
+            st.write("Copy the **16-digit passcode** (you won't see it again).")
     st.sidebar.title("⚙️ Settings")
     
     # Mode selection at the very top
@@ -221,7 +252,7 @@ def sidebar():
             new_name = st.sidebar.text_input("Your Name", value=saved_name, key="edit_name")
             new_email = st.sidebar.text_input("Your Email", value=saved_email, key="edit_email")
             new_password = st.sidebar.text_input("Your Password", type="password", key="edit_password")
-            
+                        
             col1, col2 = st.sidebar.columns(2)
             with col1:
                 if st.button("💾 Save Changes", key="save_changes"):
@@ -245,7 +276,7 @@ def sidebar():
         name = st.sidebar.text_input("Your Name", key="setup_name")
         email = st.sidebar.text_input("Your Email", key="setup_email")
         password = st.sidebar.text_input("Your Password", type="password", key="setup_password")
-        
+                
         if st.sidebar.button("💾 Save Info", key="save_info"):
             if name and email and password:
                 save_username(name)
@@ -260,15 +291,16 @@ def sidebar():
     st.sidebar.write("📜 **Email History**")
     
     history = load_email_history()
-    if saved_name and saved_name in history and history[saved_name]:
+    user_id = saved_name or st.session_state.get("setup_name", "")
+    if user_id and user_id in history and history[user_id]:
         # Create dropdown for email history
-        email_titles = [f"📧 {email_data.get('subject', 'No Subject')[:25]}..." for email_data in history[saved_name]]
+        email_titles = [f"📧 {email_data.get('subject', 'No Subject')[:25]}..." for email_data in history[user_id]]
         selected_email = st.sidebar.selectbox("Select email to view:", ["Choose an email..."] + email_titles, key="email_history_dropdown")
         
         if selected_email != "Choose an email...":
             # Find the selected email data
             email_index = email_titles.index(selected_email)
-            email_data = history[saved_name][email_index]
+            email_data = history[user_id][email_index]
             
             # Display email details below dropdown
             st.sidebar.markdown("---")
@@ -280,6 +312,53 @@ def sidebar():
                 st.session_state.viewing_email = email_data
     else:
         st.sidebar.info("No email history yet")
+
+    # Add Reset User Data button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🗑️ Delete User Data", key="reset_user_data"):
+        user_id = saved_name or st.session_state.get("setup_name", "")
+                
+        # Request backend to wipe user data (contacts, history, templates, mongo config)
+        if user_id:
+            try:
+                call_api(f"/reset-user/{user_id}", method="DELETE")
+            except Exception:
+                pass
+        
+        # Best-effort: remove locally stored credentials
+        if os.path.exists(USERNAME_FILE):
+            os.remove(USERNAME_FILE)
+        if os.path.exists(EMAIL_CONFIG_FILE):
+            os.remove(EMAIL_CONFIG_FILE)
+        
+        # Also prune local email history for this user
+        history = load_email_history()
+        if user_id and user_id in history:
+            del history[user_id]
+            save_email_history(history)
+        
+        # Clear session and explicitly clear key UI fields
+        st.session_state.clear()
+        
+        # Ensure recipient and title fields are blank after reset
+        st.session_state["simple_recipient_name"] = ""
+        st.session_state["simple_recipient_email"] = ""
+        st.session_state["simple_title"] = ""
+        st.session_state["subject"] = ""
+        st.session_state["body"] = ""
+        
+        # Clear any generated or selection state
+        for k in [
+            "generated_individual_email", "individual_recipient", "individual_title",
+            "search_indiv_title", "search_bulk_title", "search_data_title", "search_data_recipient",
+            "current_search_results", "uploaded_contacts", "mongo_users", "mongo_connected", "mongo_connections",
+            "email_history_dropdown", "viewing_email", "file_uploader_main"
+        ]:
+            if k in st.session_state:
+                del st.session_state[k]
+        
+        st.sidebar.success("✅ Your account data has been reset.")
+        st.rerun()
 
     # Return the current values (either saved or from form)
     current_name = saved_name if saved_name else st.session_state.get("setup_name", "")
@@ -345,6 +424,9 @@ def simple_mail_ui(name, email, password):
             if not all([email, password]):
                 st.error("Please configure your email in the sidebar")
                 return
+            if not name:
+                st.error("Please set your name in the sidebar before sending")
+                return
             try:
                 msg = EmailMessage()
                 msg['From'] = f"{name} <{email}>"
@@ -381,7 +463,7 @@ def database_fetch_ui(name, email, password):
 
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔗 Connect to MongoDB", key="connect_mongo_main", type="primary"):
+            if st.button("🔗 Connect to MongoDB", key="connect_mongo_main"):
                 if not name.strip():
                     st.warning("Set your Name in the sidebar first")
                 elif not mongo_url or not db_name or not collection_name:
@@ -422,7 +504,7 @@ def database_fetch_ui(name, email, password):
                         st.error(f"❌ Connection failed: {str(e)}")
         
         with col2:
-            if st.button("🗑️ Reset MongoDB Connection", key="reset_mongo_main", type="secondary"):
+            if st.button("🗑️ Reset MongoDB Connection", key="reset_mongo_main"):
                 st.session_state.mongo_users = None
                 st.session_state.mongo_connected = False
                 if "mongo_connections" in st.session_state and name in st.session_state.mongo_connections:
@@ -635,32 +717,35 @@ def database_fetch_ui(name, email, password):
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     # Send button
-                    if st.button("📨 Send Email", key="search_indiv_send", type="primary", use_container_width=True):
-                        recipient = st.session_state.get("individual_recipient", {})
-                        emaddr = recipient.get("email", "")
-                        if not emaddr:
-                            st.warning("Selected contact has no email")
+                    if st.button("📨 Send Email", key="search_indiv_send", use_container_width=True):
+                        if not name:
+                            st.warning("Set your Name in the sidebar first")
                         else:
-                            # Send email locally using SMTP (use edited fields)
-                            try:
-                                msg = EmailMessage()
-                                msg['From'] = email
-                                msg['To'] = emaddr
-                                msg['Subject'] = edited_subject
-                                msg.set_content(edited_body)
-                                
-                                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-                                    smtp.login(email, password)
-                                    smtp.send_message(msg)
-                                
-                                log_email(name, emaddr, edited_subject, edited_body)
-                                st.success("✅ Email sent successfully!")
-                                # Clear generated email
-                                del st.session_state.generated_individual_email
-                                del st.session_state.individual_recipient
-                                del st.session_state.individual_title
-                            except Exception as e:
-                                st.error(f"❌ Failed to send email: {str(e)}")
+                            recipient = st.session_state.get("individual_recipient", {})
+                            emaddr = recipient.get("email", "")
+                            if not emaddr:
+                                st.warning("Selected contact has no email")
+                            else:
+                                # Send email locally using SMTP (use edited fields)
+                                try:
+                                    msg = EmailMessage()
+                                    msg['From'] = email
+                                    msg['To'] = emaddr
+                                    msg['Subject'] = edited_subject
+                                    msg.set_content(edited_body)
+                                    
+                                    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                                        smtp.login(email, password)
+                                        smtp.send_message(msg)
+                                    
+                                    log_email(name, emaddr, edited_subject, edited_body)
+                                    st.success("✅ Email sent successfully!")
+                                    # Clear generated email
+                                    del st.session_state.generated_individual_email
+                                    del st.session_state.individual_recipient
+                                    del st.session_state.individual_title
+                                except Exception as e:
+                                    st.error(f"❌ Failed to send email: {str(e)}")
                 
                 with col2:
                     # Option to regenerate
@@ -722,10 +807,12 @@ def database_fetch_ui(name, email, password):
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     # Step 3: Send to all contacts
-                    if st.button("🚀 Send to All", type="primary", key="search_bulk_send", use_container_width=True):
+                    if st.button("🚀 Send to All", key="search_bulk_send", use_container_width=True):
                         contacts = results
                         if not contacts:
                             st.warning("No contacts to send")
+                        elif not name:
+                            st.warning("Set your Name in the sidebar first")
                         else:
                             progress = st.progress(0)
                             success_count = 0
@@ -819,10 +906,12 @@ def database_fetch_ui(name, email, password):
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
                     # Send button
-                    if st.button("📤 Send Data Email", key="search_data_send", type="primary", use_container_width=True):
+                    if st.button("📤 Send Data Email", key="search_data_send", use_container_width=True):
                         recipient_email = st.session_state.get("data_recipient", "")
                         if not recipient_email:
                             st.warning("Please enter recipient email")
+                        elif not name:
+                            st.warning("Set your Name in the sidebar first")
                         else:
                             # Send email locally using SMTP
                             try:
@@ -865,7 +954,7 @@ def database_fetch_ui(name, email, password):
     with col1_reset:
         st.info("💡 Use the buttons above to view, download, or use your data for emails")
     with col2_reset:
-        if st.button("🗑️ Reset All Data", key="reset_all_data", type="secondary"):
+        if st.button("🗑️ Reset All Data", key="reset_all_data"):
             # Clear MongoDB data
             st.session_state.mongo_users = None
             st.session_state.mongo_connected = False

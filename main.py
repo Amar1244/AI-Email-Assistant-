@@ -16,6 +16,7 @@ from utils.email_gen import generate_email
 from utils.send_email import send_email
 from bson import ObjectId
 from typing import Any
+from nlp_engine import NaturalEmailAssistant
 
 # -------------------------
 # Here i will be loading the .env files.
@@ -128,28 +129,6 @@ def set_model_ready():
     global embedding_model
     if embedding_model is None:
         embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-
-def semantic_search(data_list, query, top_k=5):
-    set_model_ready()
-    contact_texts = [
-        f"{c.get('name', '')} {c.get('title', '')} {c.get('company', '')} {c.get('email', '')}"
-        for c in data_list
-    ]
-    query_emb = embedding_model.encode(query, convert_to_tensor=True)
-    contact_embs = embedding_model.encode(contact_texts, convert_to_tensor=True)
-    scores = util.pytorch_cos_sim(query_emb, contact_embs)[0].cpu().numpy()
-    ranked_idx = np.argsort(scores)[::-1][:top_k]
-    return [
-        {
-            **data_list[idx],
-            "_score": float(scores[idx]),
-            "_matched_fields": [
-                k for k, v in data_list[idx].items()
-                if isinstance(v, str) and query.lower() in v.lower()
-            ]
-        }
-        for idx in ranked_idx
-    ]
 
 def get_mongo_client(mongo_url: str):
     return MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
@@ -340,45 +319,32 @@ async def upload_contacts(user_id: str = Form(...), file: UploadFile = File(...)
 
 @app.get("/get-contacts/{user_id}")
 def get_contacts(user_id: str):
-    # 1️⃣ Check in-memory first
+    """Get contacts for a user from uploaded data (in-memory/file) or MongoDB."""
+    # 1) Check uploaded (in-memory/file-backed)
     if user_id in uploaded_contacts:
         return {
             "status": "success",
-            "source": "in-memory",
+            "source": "uploaded",
             "contacts": uploaded_contacts[user_id]
         }
 
-    # 2️⃣ Check uploaded_contacts in MongoDB
-    mongo_uploaded = data_sources(user_id)
-    if mongo_uploaded:
+    # 2) Fallback to MongoDB connection if configured
+    if user_id in mongo_connections:
+        creds = mongo_connections[user_id]
+        client = get_mongo_client(creds["mongo_url"])
+        db = client[creds["db_name"]]
+        collection = db[creds["collection_name"]]
+        contacts = list(collection.find({}, {"_id": 0}))
         return {
             "status": "success",
-            "source": "mongo_uploaded_contacts",
-            "contacts": mongo_uploaded
+            "source": "mongo",
+            "contacts": contacts
         }
 
-    # 3️⃣ Fallback: original MongoDB collection
-    if user_id not in mongo_connections:
-        return {
-            "status": "error",
-            "message": "No data source found for this user."
-        }
-
-    creds = mongo_connections[user_id]
-    client = get_mongo_client(creds["mongo_url"])
-    collection = client[creds["db_name"]][creds["collection_name"]]
-    contacts = list(collection.find())
-
-    if not contacts:
-        return {
-            "status": "error",
-            "message": "No contacts found."
-        }
-
+    # 3) Nothing found
     return {
-        "status": "success",
-        "source": "mongo_main_collection",
-        "contacts": contacts
+        "status": "error",
+        "message": "No contacts found for this user"
     }
 
 # @app.get("/get-contacts/{user_id}")
@@ -431,7 +397,9 @@ async def search_contacts_api(data: SearchRequest):
         if not all_contacts:
             return {"status": "error", "message": "No contacts available"}
         
-        results = semantic_search(all_contacts, data.query, data.top_k)
+        # Use advanced NLP engine for search
+        nlp = NaturalEmailAssistant()
+        results = nlp.enhanced_search(all_contacts, data.query, data.top_k)
         
         return {
             "status": "success",
@@ -443,99 +411,6 @@ async def search_contacts_api(data: SearchRequest):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
-# [Rest of your existing endpoints remain unchanged...]
-# @app.post("/search-contacts")
-# async def search_contacts_api(data: SearchRequest):
-#     try:
-#         # 1. Check in-memory uploaded contacts
-#         if data.user_id and data.user_id in uploaded_contacts:
-#             contacts = uploaded_contacts[data.user_id]
-#             if contacts:
-#                 results = semantic_search(contacts, data.query, data.top_k)
-#                 return {
-#                     "status": "success",
-#                     "source": "uploaded_contacts",
-#                     "results": results
-#                 }
-
-#         # 2. Check MongoDB uploaded_contacts collection
-#         mongo_uploaded = load_contacts_from_mongo(data.user_id)
-#         if mongo_uploaded:
-#             results = semantic_search(mongo_uploaded, data.query, data.top_k)
-#             return {
-#                 "status": "success",
-#                 "source": "mongo_uploaded",
-#                 "results": results
-#             }
-
-#         # 3. Check stored MongoDB connection
-#         if data.user_id and data.user_id in mongo_connections:
-#             creds = mongo_connections[data.user_id]
-#             try:
-#                 results = search_contacts_mongo(
-#                     creds["mongo_url"],
-#                     creds["db_name"],
-#                     creds["collection_name"],
-#                     data.query,
-#                     data.top_k
-#                 )
-#                 return {
-#                     "status": "success",
-#                     "source": "stored_mongo",
-#                     "results": results
-#                 }
-#             except Exception as e:
-#                 return {"status": "error", "message": str(e)}
-
-#         # 4. Check direct MongoDB credentials
-#         if all([data.mongo_url, data.db_name, data.collection_name]):
-#             try:
-#                 results = search_contacts_mongo(
-#                     data.mongo_url,
-#                     data.db_name,
-#                     data.collection_name,
-#                     data.query,
-#                     data.top_k
-#                 )
-#                 return {
-#                     "status": "success",
-#                     "source": "direct_mongo",
-#                     "results": results
-#                 }
-#             except Exception as e:
-#                 return {"status": "error", "message": str(e)}
-
-#         # 5. Check uploaded files
-#         uploaded_files = [f for f in os.listdir(UPLOAD_FOLDER) if f.startswith(f"{data.user_id}_")]
-#         if uploaded_files:
-#             try:
-#                 file_path = os.path.join(UPLOAD_FOLDER, uploaded_files[-1])
-#                 if file_path.endswith(".csv"):
-#                     df = pd.read_csv(file_path)
-#                 else:
-#                     df = pd.read_excel(file_path)
-#                 contacts = df.replace({np.nan: None}).to_dict(orient="records")
-#                 results = semantic_search(contacts, data.query, data.top_k)
-#                 return {
-#                     "status": "success",
-#                     "source": "uploaded_file",
-#                     "results": results
-#                 }
-#             except Exception as e:
-#                 return {"status": "error", "message": f"File error: {str(e)}"}
-
-#         return {
-#             "status": "error",
-#             "message": "No data sources available",
-#             "suggestions": [
-#                 "Upload contacts using /upload-contacts",
-#                 "Configure MongoDB connection",
-#                 "Provide MongoDB credentials"
-#             ]
-#         }
-#     except Exception as e:
-#         return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
 # -------------------------
 # Email Endpoints
@@ -674,6 +549,72 @@ def delete_email_history(user_id: str):
         save_email_history()
         return {"status": "success", "message": f"History for user {user_id} deleted"}
     return {"status": "error", "message": f"No history found for user {user_id}"}
+
+@app.delete("/reset-user/{user_id}")
+def reset_user(user_id: str):
+    """Completely remove a user's data: uploaded contacts, history, templates, mongo config, and data source config.
+    Also attempts to delete any files under the upload folder that are prefixed with the user_id.
+    """
+    summary = {
+        "uploaded": 0,
+        "history": 0,
+        "templates": 0,
+        "mongo": 0,
+        "data_sources": 0,
+        "files_deleted": 0
+    }
+
+    # Uploaded contacts
+    if user_id in uploaded_contacts:
+        summary["uploaded"] = len(uploaded_contacts[user_id])
+        del uploaded_contacts[user_id]
+        save_uploaded_contacts()
+
+    # Email history
+    if user_id in email_history:
+        summary["history"] = len(email_history[user_id])
+        del email_history[user_id]
+        save_email_history()
+
+    # Templates
+    if user_id in email_templates:
+        summary["templates"] = len(email_templates[user_id])
+        del email_templates[user_id]
+        save_email_templates()
+
+    # Mongo connection
+    if user_id in mongo_connections:
+        del mongo_connections[user_id]
+        save_mongo_connections()
+        summary["mongo"] = 1
+
+    # Data source config
+    if user_id in data_sources:
+        del data_sources[user_id]
+        save_data_sources()
+        summary["data_sources"] = 1
+
+    # Try deleting any files in the upload folder scoped to the user (best-effort)
+    deleted_count = 0
+    try:
+        for fname in os.listdir(UPLOAD_FOLDER):
+            if fname.startswith(f"{user_id}_"):
+                fpath = os.path.join(UPLOAD_FOLDER, fname)
+                try:
+                    os.remove(fpath)
+                    deleted_count += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    summary["files_deleted"] = deleted_count
+
+    return {
+        "status": "success",
+        "message": f"Reset data for user {user_id}",
+        "summary": summary
+    }
 
 # -------------------------
 # Template Management

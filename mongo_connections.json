@@ -14,11 +14,6 @@
         "db_name": "email_db",
         "collection_name": "contacts"
     },
-    "Amar Chaurasiya": {
-        "mongo_url": "mongodb+srv://amarchaurasiya124:Amar124@userdata.wgjkdph.mongodb.net/?retryWrites=true&w=majority&appName=UserData",
-        "db_name": "Emailuserdata",
-        "collection_name": "Contacts"
-    },
     "demo-user": {
         "mongo_url": "",
         "db_name": "",
